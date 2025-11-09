@@ -19,22 +19,17 @@ const upload = multer();
 const PORT = process.env.PORT || 3000;
 
 // ✅ CORS (para local y producción)
-app.use((req, res, next) => {
-  const allowedOrigins = [
+app.use(cors({
+  origin: [
     'http://localhost:4200',
-    'https://frontenddowndoc.vercel.app',
-  ];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
+    'https://frontenddowndoc.vercel.app'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Manejo de preflight (para OPTIONS)
+app.options('*', cors());
 
 app.use(express.json());
 app.use(bodyParser.json());
@@ -46,7 +41,6 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Backend funcionando ✅' });
 });
-
 
 // =========================
 // 🔐 CONFIG GOOGLE OAUTH2
@@ -60,6 +54,7 @@ const UPLOADS_PATH = path.join(__dirname, 'uploads.json');
 
 const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
+// Si ya hay tokens guardados, los usa
 if (fs.existsSync(TOKEN_PATH)) {
   const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH));
   oAuth2Client.setCredentials(tokens);
@@ -219,13 +214,15 @@ app.delete('/archivo/:tipo', verificarTokenKeycloak, async (req, res) => {
 });
 
 // =========================
-// 🚀 INICIAR SERVIDOR
+// 🌍 RAÍZ DEL SERVICIO (Render check)
 // =========================
-
 app.get('/', (req, res) => {
   res.send('✅ Backend activo en Render (raíz /)');
 });
 
+// =========================
+// 🚀 INICIAR SERVIDOR
+// =========================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor en el puerto ${PORT}`);
 });
