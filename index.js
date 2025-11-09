@@ -29,7 +29,8 @@ app.use(cors({
 }));
 
 // Manejo de preflight (para OPTIONS)
-app.options('*', cors());
+// app.options('/*', cors());
+
 
 app.use(express.json());
 app.use(bodyParser.json());
