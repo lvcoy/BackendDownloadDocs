@@ -19,9 +19,17 @@ const jwksRsa = require('jwks-rsa');
 const app = express();
 const upload = multer();
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*', // 👈 permite solo tu frontend
-  credentials: true,
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+app.use(express.json());
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Backend funcionando ✅' });
+});
+
+
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -73,6 +81,7 @@ async function verificarTokenKeycloak(req, res, next) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }
 }
+
 
 // =========================
 // 🌐 AUTORIZACIÓN GOOGLE
@@ -200,9 +209,12 @@ app.delete('/archivo/:tipo', verificarTokenKeycloak, async (req, res) => {
 
 // =========================
 // 🚀 INICIAR SERVIDOR
-// =========================
-app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
 
+// =========================
+
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor en el puerto ${PORT}`);
+});
 
 // // =========================
 // // 📦 DEPENDENCIAS
