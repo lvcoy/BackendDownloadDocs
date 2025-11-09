@@ -1,15 +1,17 @@
 // =========================
 // 📦 DEPENDENCIAS
 // =========================
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const { google } = require('googleapis');
-const stream = require('stream');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-const bodyParser = require('body-parser');
+import express from 'express';
+import cors from 'cors';
+import multer from 'multer';
+import { google } from 'googleapis';
+import stream from 'stream';
+import fs from 'fs';
+import path from 'path';
+import axios from 'axios';
+import bodyParser from 'body-parser';
+import jwt from 'jsonwebtoken';
+import jwksClient from 'jwks-rsa';
 
 // =========================
 // ⚙️ CONFIGURACIÓN BASE
@@ -19,18 +21,18 @@ const upload = multer();
 const PORT = process.env.PORT || 3000;
 
 // ✅ CORS (para local y producción)
-app.use(cors({
-  origin: [
-    'http://localhost:4200',
-    'https://frontenddowndoc.vercel.app'
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Manejo de preflight (para OPTIONS)
-// app.options('/*', cors());
-
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (/vercel\.app$/.test(origin) || origin.includes('localhost:4200')) {
+        return callback(null, true);
+      }
+      callback(new Error('No autorizado por CORS'));
+    },
+    credentials: true,
+  })
+);
 
 app.use(express.json());
 app.use(bodyParser.json());
@@ -50,8 +52,8 @@ const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
 
-const TOKEN_PATH = path.join(__dirname, 'tokens.json');
-const UPLOADS_PATH = path.join(__dirname, 'uploads.json');
+const TOKEN_PATH = path.join(process.cwd(), 'tokens.json');
+const UPLOADS_PATH = path.join(process.cwd(), 'uploads.json');
 
 const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
@@ -63,31 +65,40 @@ if (fs.existsSync(TOKEN_PATH)) {
 }
 
 // =========================
-// 🔐 CONFIG KEYCLOAK
+// 🔐 CONFIG KEYCLOAK JWT (seguro y recomendado)
 // =========================
-const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
-const REALM = process.env.KEYCLOAK_REALM || 'postulaciones';
+const KEYCLOAK_JWKS_URI =
+  process.env.KEYCLOAK_JWKS_URI ||
+  'https://keycloak-cloud.onrender.com/realms/postulaciones/protocol/openid-connect/certs';
 
-async function verificarTokenKeycloak(req, res, next) {
+const client = jwksClient({ jwksUri: KEYCLOAK_JWKS_URI });
+
+function getKey(header, callback) {
+  client.getSigningKey(header.kid, (err, key) => {
+    if (err) {
+      console.error('❌ Error obteniendo clave pública:', err);
+      return callback(err);
+    }
+    const signingKey = key.getPublicKey();
+    callback(null, signingKey);
+  });
+}
+
+function verifyKeycloakToken(req, res, next) {
   const authHeader = req.headers.authorization;
-
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Falta el token de autenticación' });
-  }
+  if (!authHeader) return res.status(401).json({ error: 'Falta token' });
 
   const token = authHeader.split(' ')[1];
 
-  try {
-    const response = await axios.get(
-      `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/userinfo`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    req.user = response.data;
+  jwt.verify(token, getKey, { algorithms: ['RS256'] }, (err, decoded) => {
+    if (err) {
+      console.error('❌ Token inválido o expirado:', err.message);
+      return res.status(403).json({ error: 'Token inválido o expirado' });
+    }
+
+    req.user = decoded;
     next();
-  } catch (error) {
-    console.error('❌ Token inválido o expirado:', error.message);
-    return res.status(401).json({ error: 'Token inválido o expirado' });
-  }
+  });
 }
 
 // =========================
@@ -119,7 +130,7 @@ app.get('/oauth2callback', async (req, res) => {
 // =========================
 // 📤 SUBIR ARCHIVO
 // =========================
-app.post('/subir-archivo', verificarTokenKeycloak, upload.single('file'), async (req, res) => {
+app.post('/subir-archivo', verifyKeycloakToken, upload.single('file'), async (req, res) => {
   if (!fs.existsSync(TOKEN_PATH)) {
     return res.status(401).json({ error: 'No autorizado. Visita /auth primero.' });
   }
@@ -169,7 +180,7 @@ app.post('/subir-archivo', verificarTokenKeycloak, upload.single('file'), async 
 // =========================
 // 📁 LISTAR ARCHIVOS
 // =========================
-app.get('/archivos', verificarTokenKeycloak, (req, res) => {
+app.get('/archivos', verifyKeycloakToken, (req, res) => {
   try {
     if (!fs.existsSync(UPLOADS_PATH)) return res.json({});
     const data = JSON.parse(fs.readFileSync(UPLOADS_PATH, 'utf8'));
@@ -184,7 +195,7 @@ app.get('/archivos', verificarTokenKeycloak, (req, res) => {
 // =========================
 // 🗑️ ELIMINAR ARCHIVO
 // =========================
-app.delete('/archivo/:tipo', verificarTokenKeycloak, async (req, res) => {
+app.delete('/archivo/:tipo', verifyKeycloakToken, async (req, res) => {
   const tipo = req.params.tipo;
   const userEmail = req.user.email || req.user.preferred_username;
 
@@ -220,6 +231,17 @@ app.delete('/archivo/:tipo', verificarTokenKeycloak, async (req, res) => {
 app.get('/', (req, res) => {
   res.send('✅ Backend activo en Render (raíz /)');
 });
+
+// =========================
+// 🌐 SERVIR FRONTEND (Angular build)
+// =========================
+const frontendPath = path.join(process.cwd(), '../frontend/dist/frontend');
+if (fs.existsSync(frontendPath)) {
+  app.use(express.static(frontendPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+  });
+}
 
 // =========================
 // 🚀 INICIAR SERVIDOR
