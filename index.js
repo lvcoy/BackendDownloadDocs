@@ -47,6 +47,7 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Backend funcionando ✅' });
 });
 
+
 // =========================
 // 🔐 CONFIG GOOGLE OAUTH2
 // =========================
@@ -220,6 +221,11 @@ app.delete('/archivo/:tipo', verificarTokenKeycloak, async (req, res) => {
 // =========================
 // 🚀 INICIAR SERVIDOR
 // =========================
+
+app.get('/', (req, res) => {
+  res.send('✅ Backend activo en Render (raíz /)');
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor en el puerto ${PORT}`);
 });
